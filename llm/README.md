@@ -101,6 +101,43 @@ tarifa China 780 siguen funcionando):
 6. **Más filtrado de la consulta de Amazon**: se descartan `enviame`, `link/enlace`, `primero/segundo/tercero`,
    `aun`, `sigue`… antes de buscar.
 
+## 5.1 Mejoras de esta versión (2026-10-06/07)
+
+**Modo autónomo de compras (implementado por Codex)** — nuevo servicio
+`services/foxpack-autonomous-shopping.service.js` + sus pruebas (`test/foxpack-autonomous-shopping.test.js`,
+18 casos). El modelo **decide** con campos del contrato (`buscar_productos`, `mostrar_fotos`,
+`producto_seleccionado`, `precio_maximo_usd`, `recommended_action`) y el servicio valida cada oferta
+(ASIN, precio, URL, imagen), recuerda máximo 3 y **nunca inventa enlaces**. Interruptor del negocio en
+`organization-tools.service.js` (`amazon_lookup_enabled`, gestionado desde `platform.allsender.tech/toolset`,
+solo FoxPack).
+
+**Venta en la foto y en la lista (2026-10-07)** — el caption de la imagen y el texto de las ofertas ahora
+llevan *Antes costaba* y *Ahora* **en negrita** (`*texto*` de WhatsApp) con el % de ahorro:
+
+```
+*P30i by Anker Noise Cancelling Earbuds*
+*Antes costaba US$39.99*
+*Ahora US$23.68*  (-41%)
+Los precios pueden cambiar; confirma el total antes de comprar.
+```
+
+**Seguimiento antes de la foto** — si el cliente pide imágenes y no dice **cuál** (y hay varias opciones),
+el sistema **pregunta primero**: *"¿De cuál quieres ver la foto? Responde *1*, *2* o *3* (o escribe
+*todas*)."* Las tres se envían solo si lo pide expresamente (`recommended_action = SEND_ALL_PHOTOS`).
+
+**Contrato validado con recuperación acotada** — una respuesta en prosa ya **no** se acepta como decisión:
+se registra `Contrato JSON invalido`, se reintenta **una sola vez** exigiendo el JSON y, si vuelve a
+fallar, se responde algo neutro **sin prometer fotos**. Un fallo del proveedor (respuesta vacía) entra por
+el mismo camino, en vez de caer a la pregunta de ciudad.
+
+**Las fotos van antes del texto y solo se anuncia lo enviado** — `enviarImagenesOfertas` devuelve cuántas
+imágenes se enviaron de verdad; si el canal no confirma el adjunto, el texto pasa a *"Ahora mismo no pude
+enviarte la foto…"* y se registra el motivo (`interruptor_apagado`, `workspace_ajeno`, `error_envio`).
+
+**Un seguimiento en prosa no borra las acciones** — si el segundo turno del modelo (tras la búsqueda) llega
+solo con `reply_text`, se conservan los campos de acción de la decisión anterior. Era la causa de que el bot
+prometiera la foto y no llegara nada.
+
 ## 6. Trampas conocidas (documentadas para no repetirlas)
 
 1. **`jsonMode` + herramientas nativas de DeepSeek no son compatibles.** Intentar `tools` con modo JSON
@@ -115,3 +152,11 @@ tarifa China 780 siguen funcionando):
    TV de 50" a US$7. Además se descartan descuentos >85 % y precios <US$3.
 6. `String.replace(viejo, nuevo)`: si el reemplazo contiene `$'` (por ejemplo el texto `US$'`), JavaScript
    inserta "el resto del archivo" y destruye el fichero. Usar `replace(viejo, () => nuevo)`.
+7. **NO inyectar `response_format: json_object` en las peticiones a DeepSeek** con el prompt largo del router.
+   Se probó el 2026-10-06 y **6 de 10 llamadas volvieron vacías** (`deepseek returned an empty response`,
+   `httpStatus: null`) → el turno caía al respaldo y el cliente recibía la pregunta de ciudad. El código lo
+   lleva comentado para que nadie lo repita; el contrato se valida y se reintenta en el router.
+8. **El proceso puede "cuñas"**: si el router deja de resolver la llave del tenant, todas las conversaciones
+   pasan a texto fijo sin error visible para el cliente. Señal: `Tenant provider failed` en
+   `wapi-api-error.log` (sin marcas de tiempo: comparar contador entre mediciones). Remedio inmediato:
+   `pm2 restart wapi-api`. Propuesta pendiente: vigilante en el servidor que reinicie solo.

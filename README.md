@@ -293,3 +293,4 @@ Las claves viven en `.env` del servidor y en `user_settings` del cliente.
 
 Código y documentación **propiedad de CodeMorf / cliente FoxPack**. Ver `LICENSE`.
 Si se quiere publicar como open source, sustituir por MIT o Apache-2.0.
+

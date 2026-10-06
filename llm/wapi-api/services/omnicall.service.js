@@ -160,6 +160,9 @@ class OmnicallService {
         apiKey,
         baseUrl,
         fetch: async (url, options) => {
+          // OJO: NO inyectar response_format aqui. Probado el 2026-10-06: con el prompt largo del router
+          // DeepSeek devolvio respuestas VACIAS en 6 de 10 llamadas y el turno caia al respaldo.
+          // El contrato se valida (y se reintenta una vez) en el router.
           const response = await fetch(url, options);
           httpStatus = response.status;
           console.log('[AI SDK HTTP]', { provider: normalizedProvider, model, user_id: userId ? String(userId) : null, workspace_id: workspaceId ? String(workspaceId) : null, status: httpStatus, elapsedMs: Date.now()-requestStartedAt });
