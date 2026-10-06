@@ -259,7 +259,33 @@ README.md                        ← este documento (cerebro + consulta + backlo
 docs/01-mapa-mental-llm.md       ← mapa mental y flujo completos, con detalle por bloque
 docs/02-chat-wa-fixes.md         ← arreglos del chat (audio, texto, ortografía local)
 docs/03-historial-incidentes.md  ← los fallos reales y cómo se resolvieron
+llm/README.md                    ← código aislado: qué es cada archivo y cómo montarlo
+llm/wapi-api/…                   ← el código del LLM y sus funciones (snapshot 2026-10-07)
 ```
+
+---
+
+## 11. Código aislado del LLM (`llm/`)
+
+Snapshot del **2026-10-07** con **solo** el código del LLM y sus funciones, extraído aparte porque el resto
+de la aplicación tiene cambios fuera del SaaS. Ver el detalle en [`llm/README.md`](llm/README.md).
+
+| Archivo | Rol |
+| --- | --- |
+| `services/branch-router.service.js` | **El cerebro**: prompt, llamada al modelo, contrato JSON y ejecución |
+| `services/omnicall.service.js` | **Capa del modelo**: AI SDK, modo JSON, cadena de respaldo |
+| `services/amazon-deals-live.service.js` | **Ofertas en vivo** (Prime, oferta, ≤ US$199, máx. 3, antes/ahora) |
+| `services/foxpack-tracking.service.js` | **Tracking real** del courier |
+| `services/knowledge-retrieval.service.js` | **RAG**: conocimiento del negocio (9.000 chars, `policy` primero) |
+| `services/handoff-ack.service.js` | Acuse al pasar a una persona (con candado de un mensaje por turno) |
+| `services/conversation-context.service.js` | Contexto de conversación y aviso de ticket abierto |
+| `services/deepseek.service.js` | Cliente directo de DeepSeek (auxiliar) |
+| `utils/response-style-policy.js` | Saneado y estilo de las respuestas |
+| `utils/ai-utils.js` | Utilidades de IA compartidas |
+| `scripts/aviso-silencio.mjs` | Cron anti-silencio (cada 5 min, soporta `--dry`) |
+
+**Verificado antes de publicar:** ningún archivo contiene claves, tokens, contraseñas, teléfonos ni correos.
+Las claves viven en `.env` del servidor y en `user_settings` del cliente.
 
 ---
 
