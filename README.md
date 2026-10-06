@@ -225,6 +225,8 @@ const omniResult = await omnicallService.chatCompletion({
 | 8 | **Memoria de largo plazo por cliente** (resumen acumulado) | Conversaciones largas sin repetir contexto | Medio | Medio |
 | 9 | **Ruido del log de Zernio** | Limpieza operativa | Bajo | Bajo |
 | 10 | **Activar para más clientes** (hoy solo FoxPack) | Escalar el producto | Alto | Bajo (aislar por workspace) |
+| 11 | **Audios entrantes: transcribir y seguir conversando** — la transcripción YA existe (`utils/voice-ai.service.js`, Whisper) pero solo se activa en el camino de *chatbots* (exige `chatbot.voice_settings.enabled`); el router de sucursales NO la usa, así que una nota de voz no se entiende. Coste ~US$0,006/min. Si falla la transcripción: avisar y ofrecer escribir o pasar con un asesor | Las notas de voz son muy comunes en RD y hoy se pierden | Alto | Bajo (activar la pieza en el camino del router) |
+| 12 | **Imágenes entrantes: visión híbrida** — hoy solo se lee el caption (`imageMessage?.caption`), no hay visión ni OCR. Propuesta: producto → visión + búsqueda de ofertas; comprobante/dirección/etiqueta → extraer datos; **paquete dañado o reclamo → pasar a humano con la foto y la transcripción adjuntas al ticket**. Requiere llave con visión (Gemini o GPT-4o-mini, ~US$0,0005-0,002 por foto). **DeepSeek `deepseek-chat` es solo texto: no oye ni ve** | El cliente envía fotos y el asistente no las entiende | Alto | Medio (pieza nueva + llave) |
 
 ---
 
@@ -293,4 +295,5 @@ Las claves viven en `.env` del servidor y en `user_settings` del cliente.
 
 Código y documentación **propiedad de CodeMorf / cliente FoxPack**. Ver `LICENSE`.
 Si se quiere publicar como open source, sustituir por MIT o Apache-2.0.
+
 
