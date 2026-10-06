@@ -1,0 +1,38 @@
+# Dependencias
+node_modules/
+
+# Builds
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# Entorno y secretos
+.env
+.env.local
+.env.production
+.env.*
+!.env.example
+
+# Datos del importador
+*.jsonl
+*.sqlite
+*.db
+*.xlsx
+*.csv
+images/
+
+# Logs
+*.log
+logs/
+
+# Temporales y respaldos
+*.bak
+*.bak-*
+*.old
+tmp/
+temp/
+
+# Sistema
+.DS_Store
+Thumbs.db
