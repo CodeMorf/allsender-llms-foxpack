@@ -280,6 +280,7 @@ const PALABRAS_CORTAS = new Set(['tv','pc','hd','4k','5k','8k','usb','ssd','sd',
       .replace(/[^a-z0-9ñ\s]/g, ' ')
       .split(/\s+/)
       .filter((w) => (w.length >= 3 || PALABRAS_CORTAS.has(w)) && !stop.has(w))
+      .filter((w) => !/^(enviame|link|links|enlace|enlaces|primera|primeras|primero|primeros|segunda|segundo|tercera|tercero|aun|sigue|siguen)$/.test(w))
       .slice(0, 6)
       .join(' ')
       .trim();

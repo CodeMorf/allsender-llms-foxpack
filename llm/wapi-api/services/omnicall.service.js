@@ -11,6 +11,7 @@ import { createMistral } from '@ai-sdk/mistral';
 import { createGroq } from '@ai-sdk/groq';
 import { createTogetherAI } from '@ai-sdk/togetherai';
 import { createFireworks } from '@ai-sdk/fireworks';
+import { safeAiError } from '../utils/ai-error-details.js';
 
 const PROVIDER_DEFAULTS = {
   deepseek: process.env.DEEPSEEK_API_BASE_URL || 'https://api.deepseek.com',
@@ -135,12 +136,14 @@ class OmnicallService {
    * Call a hosted provider through the Vercel AI SDK.
    * No model is installed locally; the provider API receives the tenant key.
    */
-  async callProvider({ provider, model, apiKey, baseUrl, messages, temperature, maxTokens, jsonMode, userId, abortSignal }) {
+  async callProvider({ provider, model, apiKey, baseUrl, messages, temperature, maxTokens, jsonMode, userId, workspaceId, abortSignal }) {
     if (!apiKey) throw new Error(`Missing API key for provider: ${provider}`);
     const normalizedProvider = normalizeProvider(provider);
     console.log('[AI SDK] Generated Request Body:', JSON.stringify({
       provider: normalizedProvider,
       model,
+      user_id: userId ? String(userId) : null,
+      workspace_id: workspaceId ? String(workspaceId) : null,
       message_count: messages.length,
       characters: messages.reduce((sum, message) => sum + String(message.content || '').length, 0),
       temperature,
@@ -159,7 +162,7 @@ class OmnicallService {
         fetch: async (url, options) => {
           const response = await fetch(url, options);
           httpStatus = response.status;
-          console.log('[AI SDK HTTP]', { provider: normalizedProvider, model, status: httpStatus, elapsedMs: Date.now()-requestStartedAt });
+          console.log('[AI SDK HTTP]', { provider: normalizedProvider, model, user_id: userId ? String(userId) : null, workspace_id: workspaceId ? String(workspaceId) : null, status: httpStatus, elapsedMs: Date.now()-requestStartedAt });
           return response;
         }
       }),
@@ -173,6 +176,8 @@ class OmnicallService {
     console.log('[AI SDK] Response:', {
       provider: normalizedProvider,
       model,
+      user_id: userId ? String(userId) : null,
+      workspace_id: workspaceId ? String(workspaceId) : null,
       elapsedMs: Date.now() - requestStartedAt,
       httpStatus,
       finishReason: result.finishReason || null
@@ -189,6 +194,13 @@ class OmnicallService {
       await AiPromptLog.create({
         user_id: userId,
         feature: `ai_sdk_${normalizedProvider}`,
+        workspace_id: workspaceId || null,
+        provider: normalizedProvider,
+        model,
+        status: 'success',
+        http_status: httpStatus,
+        elapsed_ms: Date.now() - requestStartedAt,
+        finish_reason: result.finishReason || null,
         prompt_tokens: promptTokens,
         completion_tokens: completionTokens,
         total_tokens: totalTokens
@@ -213,6 +225,7 @@ class OmnicallService {
     preferredModel = null,
     preferredBaseUrl = null,
     userId = null,
+    workspaceId = null,
     fallbackChain = null,
     abortSignal = null
   } = {}) {
@@ -244,6 +257,11 @@ class OmnicallService {
     }
 
     const errors = [];
+    if (!queue.length) {
+      errors.push({ provider: preferredProvider, model: preferredModel,
+        code: String(customApiKey || '').startsWith('enc:') ? 'AI_KEY_ENCRYPTED' : 'AI_KEY_MISSING',
+        error: 'Tenant API key is missing or has not been decrypted', httpStatus: null, retryable: false });
+    }
     for (const target of queue) {
       const { provider, model, apiKey } = target;
       const keyToUse = apiKey;
@@ -252,6 +270,7 @@ class OmnicallService {
         continue;
       }
 
+      const startedAt = Date.now();
       try {
         const result = await this.callProvider({
           provider,
@@ -263,6 +282,7 @@ class OmnicallService {
           jsonMode,
           baseUrl: target.baseUrl,
           userId,
+          workspaceId,
           abortSignal
         });
 
@@ -285,7 +305,13 @@ class OmnicallService {
           errors.push({ provider, model, error: result.errors?.map(e => e.error).join('; ') || 'No output returned' });
         }
       } catch (callErr) {
-        errors.push({ provider, model, error: callErr.message });
+        const details = safeAiError(callErr, [keyToUse]);
+        errors.push({ provider, model, ...details });
+        console.error('[AI Provider Failure]', JSON.stringify({
+          at: new Date().toISOString(), user_id: userId ? String(userId) : null,
+          workspace_id: workspaceId ? String(workspaceId) : null,
+          provider, model, elapsedMs: Date.now() - startedAt, ...details
+        }));
       }
     }
 

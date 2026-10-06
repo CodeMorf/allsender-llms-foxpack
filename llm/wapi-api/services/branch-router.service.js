@@ -36,8 +36,9 @@ const normalize = (text) => String(text || '')
 const TARIFAS_POR_LIBRA = { china: 780, miami: 245 };
 // Guardia determinista de precios: el modelo cotizo China con la tarifa de Miami (RD$245) el 05-oct.
 // Es un dato de dinero, asi que se corrige antes de enviar.
-const corregirTarifas = (texto) => {
+const corregirTarifas = (texto, workspaceId) => {
   let t = String(texto || "");
+  if (String(workspaceId || '') !== AMAZON_LIVE_WORKSPACE) return t;
   if (!t || !/china/i.test(t) || !/libra/i.test(t)) return t;
   const traePrecioMiami = /(245|244[.,]99)/.test(t);
   const traeChinaBuena = /780/.test(t);
@@ -47,7 +48,8 @@ const corregirTarifas = (texto) => {
   }
   return t;
 };
-const sanearRespuesta = (texto) => corregirTarifas(trimProactiveEnding(texto));
+const sanearRespuesta = (texto, workspaceId) => corregirTarifas(trimProactiveEnding(texto), workspaceId);
+export { corregirTarifas as correctFoxpackRates };
 
 function calculateDistanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371; // km
@@ -621,7 +623,7 @@ export class BranchRouterService {
       const pideFoto = /foto|fotos|imagen|imagenes|foticos|verlo|verla|muestrame|muestramelo|me lo muestras|se ve/i.test(textoDelCliente);
       // Se entiende la intencion real: pide ofertas O pide un producto para comprar. Se excluyen las
       // preguntas sobre su envio, que no son busquedas de producto (2026-10-06).
-      const mencionaProducto = /amazon|oferta|descuento|barato|barata|promo|deal|producto|prime/i.test(textoDelCliente);
+      const mencionaProducto = /\b(?:amazon|ofertas?|descuentos?|baratos?|baratas?|promo|deal|productos?|prime)\b/i.test(textoDelCliente);
       const quiereAlgo = /busco|buscas|busca|buscamos|buscar|buscando|busque|quiero|quiere|queria|quisiera|necesito|necesita|comprar|compra|compro|comprarlo|recomiend|algo para|algo como|donde compro|conseguir|regalar|tiene algo|tienen algo|hay algo|tienes algo|venden|vende|vendes|manejan|maneja|ofrecen|ofrece|encontre|encuentro|algun|alguna|me interesa|me gustaria|gustaria|ese mismo|el primero|el segundo|el tercero/i.test(textoDelCliente);
       const esSobreSuEnvio = /paquete|tracking|rastreo|casillero|envio|enviar|guia|sucursal|retirar|flete|prealerta|libra|libras|tarifa|tarifas|cuesta|cuanto cuesta|cotiz|aduan|impuesto/i.test(textoDelCliente);
       const pideOfertas = (mencionaProducto || quiereAlgo) && !esSobreSuEnvio;
@@ -967,13 +969,13 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
     try {
       // 3. Invocar Omnicall Service (Pooling resiliente: Gemini, DeepSeek, Groq, OpenAI con fallback)
       const wsDoc = await Workspace.findById(wsId).lean();
-      const ownerUserId = wsDoc?.user_id || contactDoc.user_id || contactDoc.created_by;
+      if (!wsDoc || wsDoc.deleted_at || wsDoc.is_active === false || !wsDoc.user_id) {
+        throw new Error('Active workspace owner is required to resolve tenant AI');
+      }
+      const ownerUserId = wsDoc.user_id;
 
       const UserSetting = mongoose.models.UserSetting || mongoose.model('UserSetting');
       let userSetting = await UserSetting.findOne({ user_id: ownerUserId }).populate('ai_model').lean();
-      if (!userSetting?.ai_model && contactDoc.created_by) {
-        userSetting = await UserSetting.findOne({ user_id: contactDoc.created_by }).populate('ai_model').lean();
-      }
 
       if (!userSetting?.ai_model) {
         // La migracion dejo el modelo del cliente en la coleccion ai_models; el modelo Mongoose
@@ -1047,6 +1049,7 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
           preferredBaseUrl: userSetting?.ai_model?.api_endpoint || null,
           customApiKey: userSetting?.api_key || null,
           userId: ownerUserId,
+          workspaceId: wsId,
           fallbackChain: userSetting?.api_key ? [{
             provider: userSetting?.ai_model?.provider || 'deepseek',
             model: userSetting?.ai_model?.model_id || 'deepseek-chat',
@@ -1060,13 +1063,20 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
           console.log(`[BranchRouter AI Mode] Response via Omnicall (${omniResult.provider}/${omniResult.model}):`, aiResponse);
         } else if (omniResult.text) {
           aiResponse = omnicallService.parseJsonSafely(omniResult.text) || { reply_text: omniResult.text, needs_transfer: false };
+        } else {
+          console.error('[BranchRouter AI Mode] Provider failure detail', JSON.stringify({
+            at: new Date().toISOString(), workspace_id: String(wsId), user_id: String(ownerUserId),
+            errors: omniResult.errors || []
+          }));
         }
       } catch (omniErr) {
-        console.warn('[BranchRouter AI Mode] Omnicall execution warning, trying direct DeepSeek fallback:', omniErr.message);
+        console.warn('[BranchRouter AI Mode] Omnicall execution warning:', omniErr.message);
       }
 
       if (!aiResponse) {
-        console.error('[BranchRouter AI Mode] Tenant provider failed; platform key is not used');
+        console.error('[BranchRouter AI Mode] Tenant provider failed; platform key is not used', JSON.stringify({
+          at: new Date().toISOString(), workspace_id: String(wsId), user_id: String(ownerUserId)
+        }));
       }
 
       const rawIntent = aiResponse?.customer_intent || aiResponse?.intent || 'UNKNOWN';
@@ -1121,7 +1131,7 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
       } catch (trackErr) {
         console.warn('[BranchRouter] Tracking lookup warning:', trackErr.message);
       }
-      replyText = sanearRespuesta(replyText);
+      replyText = sanearRespuesta(replyText, wsId);
       // SI LA CONVERSACIÓN YA TIENE UN CASO / ASIGNACIÓN ABIERTA (SEGUIMIENTO ACTIVO)
       if (activeAssignment && activeAssignment.branch_id) {
         if (replyText) {
@@ -1272,7 +1282,7 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
           (delTexto.length >= 2 ? ' (tomada del texto del modelo)' : ' (armada por el sistema)'));
       }
 
-      replyText = sanearRespuesta(replyText);
+      replyText = sanearRespuesta(replyText, wsId);
       const textoCliente = String(incomingText || '').trim();
       const cierreSimple = /^\s*(muchas\s+)?(gracias|ok|okey|okay|listo|perfecto|excelente|de acuerdo|vale|bien|entendido|genial|de nada|saludos|si|sí|👍|🙏)[\s,.!¡?]*$/i.test(textoCliente);
       const pidePersonaOProblema = /(hablar|comunicar|atienda|atiendan|pasame|pásame|necesito|quiero)\s+(con\s+)?(una?\s+)?(persona|asesor|agente|humano|alguien)|reclamo|reclamar|queja|perdid|perdi|no ha llegado|no llega|nunca lleg|da[nñ]ad|roto|extraviad|demora|retras|atrasad|molest|inconform|devoluc|reembols|cancel|urge|emergencia/i.test(textoCliente);

@@ -25,6 +25,7 @@ solo: necesita el resto de `wapi-api` (modelos, canales, base de datos).
 | `services/deepseek.service.js` | Cliente directo de DeepSeek (uso auxiliar). | `deepseekService` |
 | `utils/response-style-policy.js` (reflejos) | Saneado y estilo: cortar cierres proactivos, detectar cortesías, conversaciones ya cerradas, preguntas pendientes. | `trimProactiveEnding()`, `classifyCourtesyAcknowledgement()`, `alreadyClosedConversation()`, `hasPendingRequiredQuestion()` |
 | `utils/ai-utils.js` | Utilidades de IA compartidas (conteo de tokens, ayudas de llamada). | `callAIModel()` y helpers |
+| `utils/ai-error-details.js` | Resume los errores del proveedor para los logs sin exponer la clave. | `safeAiError()` |
 | `scripts/aviso-silencio.mjs` **(sistema inmune)** | Cron cada 5 min: si un caso lleva >10 min sin respuesta humana y el cliente espera, le avisa (máx. 2 veces, 30 min entre avisos). Soporta `--dry`. | ejecutable directo con `node` |
 
 ---
@@ -77,7 +78,30 @@ canal (WhatsApp / Instagram / Facebook / webchat)
 
 ---
 
-## 5. Trampas conocidas (documentadas para no repetirlas)
+## 5. Endurecimiento incluido en esta versión (Codex, 2026-10-06 18:51Z)
+
+Estos cambios ya están aplicados en producción y verificados en vivo (fecha correcta, ofertas antes/ahora y
+tarifa China 780 siguen funcionando):
+
+1. **El workspace debe estar activo y tener dueño.** Si `Workspace.findById()` no devuelve un workspace
+   activo con `user_id`, se lanza un error explícito. Se eliminó el respaldo que buscaba la llave en
+   `contactDoc.created_by` (era la vía por la que un contacto de agente podía quedarse sin llave).
+2. **La guardia de tarifas (780/245) solo aplica al workspace de FoxPack** (`corregirTarifas(texto,
+   workspaceId)`), para no reescribir precios de otros clientes. Se exporta como `correctFoxpackRates`
+   (permite probarla aislada).
+3. **Detección de productos con límites de palabra** (`\b`), para que "producto" no dispare por coincidir
+   dentro de otra palabra.
+4. **Telemetría por workspace**: `chatCompletion` acepta `workspaceId` y se registra en
+   `[AI SDK] Generated Request Body`, `[AI SDK HTTP]`, `[AI SDK] Response` y en `AiPromptLog`
+   (`workspace_id`, `provider`, `model`, `status`, `http_status`, `elapsed_ms`, `finish_reason`).
+5. **Errores del proveedor con detalle**: cuando la llamada falla se registra
+   `[BranchRouter AI Mode] Provider failure detail { workspace_id, user_id, errors }` y el aviso
+   `Tenant provider failed` ya incluye el JSON con el motivo. Además se quitó la frase engañosa
+   "trying direct DeepSeek fallback" (ese respaldo no existía).
+6. **Más filtrado de la consulta de Amazon**: se descartan `enviame`, `link/enlace`, `primero/segundo/tercero`,
+   `aun`, `sigue`… antes de buscar.
+
+## 6. Trampas conocidas (documentadas para no repetirlas)
 
 1. **`jsonMode` + herramientas nativas de DeepSeek no son compatibles.** Intentar `tools` con modo JSON
    rompe la llamada y todas las conversaciones caen al respaldo fijo.
