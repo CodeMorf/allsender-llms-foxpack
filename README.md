@@ -187,8 +187,19 @@ const omniResult = await omnicallService.chatCompletion({
 | `resolved_branch_id` | Sucursal elegida o `null` |
 | `needs_transfer` | Pasar el caso a una persona |
 | `tracking_code` | Dispara el ejecutor del courier |
-| `buscar_productos` | (en pruebas) lo que busca el cliente, o `null` |
+| `buscar_productos` | (en vivo) lo que busca el cliente, o `null` |
 | `recommended_action` | Qué haría el router después |
+
+---
+
+### 5.1 Validacion del contrato (2026-10-07)
+
+El contrato no se acepta por ser "un objeto": `validarContratoBranchRouter` revisa los campos y sus tipos
+(`needs_transfer`/`mostrar_fotos` booleanos, `producto_seleccionado` 1-3, `buscar_productos` texto o lista,
+`collected_information` lista de etiquetas) y exige **texto o al menos una accion**. Un JSON que solo decide
+buscar productos o transferir sigue siendo valido. Si la respuesta viene en prosa se reintenta **una vez**, y
+ese reintento es **solo de FoxPack** (`AMAZON_LIVE_WORKSPACE`): en el resto de clientes se conserva el
+comportamiento anterior, sin llamada extra ni texto de relleno.
 
 ---
 
@@ -208,10 +219,16 @@ const omniResult = await omnicallService.chatCompletion({
 4. **Nunca inventar**: precios y stock solo desde el ejecutor; fechas siempre estimadas.
 5. **Solo FoxPack** en la búsqueda de ofertas (`AMAZON_LIVE_WORKSPACE`).
 6. **No tocar la capa del modelo sin probarla aparte**: `jsonMode` + herramientas nativas de DeepSeek **no son compatibles** (rompió el flujo entero el 2026-10-06).
+7. **El reintento del contrato es solo de FoxPack**: fuera de `AMAZON_LIVE_WORKSPACE` no hay llamada extra al modelo ni texto de relleno (2026-10-07).
+8. **Un chat resuelto es un chat cerrado**: si el cliente vuelve a escribir, el chat se reabre y la IA interviene. Con un caso abierto en manos de una persona la IA se mantiene fuera, y retoma a las 2 h si esa persona no responde (2026-10-07).
 
 ---
 
 ## 8. Qué falta por mejorar (backlog)
+
+> Estado al **2026-10-07**: hechos el **1** (modo autónomo por contrato), el **9** (ruido del log de Zernio)
+> y el **5** en su primera parte (`test/branch-router-contrato.test.js`). El **2** (vigilante dentro del
+> servidor) sigue pendiente de aprobación. El resto, igual.
 
 | # | Mejora | Por qué | Impacto | Esfuerzo |
 | --- | --- | --- | --- | --- |
@@ -260,7 +277,8 @@ Marcadores útiles del log:
 README.md                        ← este documento (cerebro + consulta + backlog)
 docs/01-mapa-mental-llm.md       ← mapa mental y flujo completos, con detalle por bloque
 docs/02-chat-wa-fixes.md         ← arreglos del chat (audio, texto, ortografía local)
-docs/03-historial-incidentes.md  ← los fallos reales y cómo se resolvieron
+docs/03-historial-incidentes.md  ← los fallos reales y cómo se resolvieron (15 incidentes + trampas)
+docs/04-cambios-2026-10-07.md    ← la actualización del 2026-10-07: contrato, canales sociales y chats resueltos
 llm/README.md                    ← código aislado: qué es cada archivo y cómo montarlo
 llm/wapi-api/…                   ← el código del LLM y sus funciones (snapshot 2026-10-07)
 ```
@@ -285,9 +303,28 @@ de la aplicación tiene cambios fuera del SaaS. Ver el detalle en [`llm/README.m
 | `utils/response-style-policy.js` | Saneado y estilo de las respuestas |
 | `utils/ai-utils.js` | Utilidades de IA compartidas |
 | `scripts/aviso-silencio.mjs` | Cron anti-silencio (cada 5 min, soporta `--dry`) |
+| `test/branch-router-contrato.test.js` | **Pruebas del contrato**: campos, tipos y "texto o acción" |
 
 **Verificado antes de publicar:** ningún archivo contiene claves, tokens, contraseñas, teléfonos ni correos.
 Las claves viven en `.env` del servidor y en `user_settings` del cliente.
+
+---
+
+## 12. Velocidad medida (2026-10-07)
+
+Mediana de 5 turnos por canal, con las conexiones reales de FoxPack:
+
+| Turno | Antes | Ahora |
+| --- | --- | --- |
+| Saludo o tarifa (1 llamada al modelo) | 1,5-3,1 s | 1,5-1,9 s |
+| Ofertas con búsqueda en vivo | 4,8 / 7,9 / 4,9 / 5,5 s | 4,4 / 3,1 / 3,1 / 3,9 s |
+
+Un turno de ofertas = llamada 1 (decidir) 1,4-2,7 s + búsqueda en Amazon 1,8-2,5 s (0 ms con la caché
+caliente: 5 minutos por consulta, `AMAZON_LIVE_CACHE_TTL_MS`) + llamada 2 (redactar) 1,3-1,8 s. El canal
+casi no influye: los cuatro usan el mismo camino. **Lección medida**: recortar el prompt de la segunda
+llamada (38,7 k → 1,9 k caracteres) ahorra ~95 % de los tokens de entrada pero **no baja el tiempo**
+(DeepSeek procesa el prompt largo igual de rápido, cache de contexto). El piso real es ~1,5 s, una sola
+llamada al modelo.
 
 ---
 
