@@ -21,6 +21,15 @@ const PRIME_FILTER_APPLIED = true;
 const PRIME_REFINEMENT = 'p_n_is_prime_eligible:1';
 const DEALS_REFINEMENT = 'p_n_deal_type:23566065011';
 
+// Memoria corta de bloqueo: si Amazon bloquea la descarga directa, se evita reintentarla 10 minutos.
+let bloqueadoHasta = 0;
+
+// Memoria corta de resultados: dos consultas identicas en pocos minutos no repiten la descarga
+// (cada consulta en vivo cuesta ~2 s; repetirla tambien aumenta el riesgo de que Amazon bloquee).
+const CACHE_TTL_MS = Number(process.env.AMAZON_LIVE_CACHE_TTL_MS || 5 * 60 * 1000);
+const CACHE_MAX = 50;
+const cacheOfertas = new Map();
+
 const BLOCK_MARKERS = [
   'cs_503_search',
   'api-services-support@amazon.com',
@@ -290,13 +299,27 @@ const PALABRAS_CORTAS = new Set(['tv','pc','hd','4k','5k','8k','usb','ssd','sd',
    * Busca ofertas EN VIVO. No guarda nada: descarga, parsea y devuelve como maximo `max` productos.
    * @param {{ query: string, max?: number, maxPriceUsd?: number, timeoutMs?: number }} opts
    */
-  async buscar({ query, max = 3, maxPriceUsd = MAX_PRICE_USD, timeoutMs = 9000 } = {}) {
+  async buscar({ query, max = 3, maxPriceUsd = MAX_PRICE_USD, timeoutMs = 6000 } = {}) {
     const started = Date.now();
     const keyword = String(query || '').trim();
     if (!keyword) return { ok: false, reason: 'sin_consulta', items: [], url: null, provider: null, ms: 0 };
     const url = searchUrl({ keyword });
+    const cacheKey = keyword.toLowerCase() + '|' + max + '|' + maxPriceUsd;
+    const enCache = cacheOfertas.get(cacheKey);
+    if (enCache && Date.now() - enCache.at < CACHE_TTL_MS) {
+      console.log('[AmazonLive] cache hit (' + Math.round((Date.now() - enCache.at) / 1000) + ' s) query="' + keyword + '"');
+      return { ...structuredClone(enCache.valor), ms: Date.now() - started, cached: true };
+    }
 
-    let page = await fetchDirect(url, timeoutMs);
+    let page;
+    if (Date.now() < bloqueadoHasta) {
+      // Memoria corta: si Amazon nos bloqueo hace poco, se va directo a Firecrawl y se ahorra el intento.
+      console.log('[AmazonLive] descarga directa en pausa por bloqueo reciente; voy directo a Firecrawl');
+      page = { provider: 'direct', status: 0, html: '', bytes: 0, ms: 0, cost: 0, kind: 'blocked' };
+    } else {
+      page = await fetchDirect(url, timeoutMs);
+      if (page.kind === 'blocked' || page.kind === 'captcha') bloqueadoHasta = Date.now() + 10 * 60 * 1000;
+    }
     if (page.kind !== 'ok') {
       console.log('[AmazonLive] directo no sirvio (' + page.kind + '), se intenta Firecrawl');
       const fc = await fetchFirecrawl(url, 45000);
@@ -316,7 +339,7 @@ const PALABRAS_CORTAS = new Set(['tv','pc','hd','4k','5k','8k','usb','ssd','sd',
 
     console.log('[AmazonLive] query="' + keyword + '" provider=' + page.provider + ' html=' + page.html.length + ' parseados=' + parsed.length + ' validos=' + ok.length + ' devueltos=' + items.length + ' ms=' + (Date.now() - started) + ' creditos=' + page.cost);
 
-    return {
+    const salida = {
       ok: items.length > 0,
       reason: items.length ? null : (parsed.length ? 'sin_candidatos_validos' : 'sin_resultados'),
       items: items.map((r) => ({
@@ -335,6 +358,9 @@ const PALABRAS_CORTAS = new Set(['tv','pc','hd','4k','5k','8k','usb','ssd','sd',
       ms: Date.now() - started,
       credits: page.cost || 0
     };
+    cacheOfertas.set(cacheKey, { at: Date.now(), valor: structuredClone(salida) });
+    if (cacheOfertas.size > CACHE_MAX) cacheOfertas.delete(cacheOfertas.keys().next().value);
+    return salida;
   }
 };
 
