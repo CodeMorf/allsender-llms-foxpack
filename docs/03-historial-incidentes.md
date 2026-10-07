@@ -29,6 +29,7 @@ Registro de lo que falló, por qué, y cómo quedó. Sirve para no repetirlo.
 5. **Hora del servidor y de la base**: el servidor está en **AST (UTC-4)** y la consola de Mongo muestra **UTC**. Un mensaje de las 19:34 en el panel es 23:34 UTC. Mezclar las dos horas hace que un arreglo parezca anterior o posterior a lo que realmente es.
 6. **`deleteMany` con un filtro que no encaja no avisa**: el resolver de chats devolvía `200 success` sin haber cerrado nada. Al tocar filtros de asignaciones, comprobar siempre **cuántas filas cambiaron**.
 7. **Refactor que copia un bloque a otra función**: al mover el alta de contacto social, quedaron referencias a variables que solo existían en la función original. Un `node --check` pasa (es sintaxis válida); el fallo solo se ve en ejecución. Revisar los nombres de parámetros al copiar bloques.
+8. **La orden de formato va como último mensaje del usuario, no en el prompt del sistema**: dentro del prompt, aunque sea al final, el modelo la ignora y contesta en prosa. Con historial real eso pasaba en **todos** los turnos y cada uno pagaba el reintento (2026-10-07). Puesta como último mensaje del usuario, cumple.
 
 ## Cómo comprobar que el asistente está sano (rutina)
 
